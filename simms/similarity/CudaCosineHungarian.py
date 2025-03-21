@@ -14,24 +14,6 @@ from .spectrum_similarity_functions import cosine_kernel
 
 class CudaCosineHungarian(BaseSimilarity):
     """
-    Calculate cosine similarity score between two spectra using CUDA acceleration.
-
-    The score is calculated by finding the best possible matches between peaks of two spectra.
-    It provides a 'greedy' solution for the peak assignment problem, aimed at faster performance.
-
-    This implementation is meant to replicate outputs of `matchms.similarity.CosineGreedy`.
-
-    For example:
-
-    >>> import numpy as np
-    >>> from matchms import Spectrum
-    >>> from simms.similarity import CudaCosineGreedy
-    >>> reference = Spectrum(mz=np.array([100, 150, 200.]), intensities=np.array([0.7, 0.2, 0.1]))
-    >>> query = Spectrum(mz=np.array([100, 140, 190.]), intensities=np.array([0.4, 0.2, 0.1]))
-    >>> cosine_greedy = CudaCosineGreedy(tolerance=0.2)
-    >>> score = cosine_greedy.pair(reference, query)
-    >>> print(f"Cosine score is {score['score']:.2f} with {score['matches']} matched peaks")
-    Cosine score is 0.83 with 1 matched peaks
     """
 
     score_datatype = [
@@ -53,28 +35,6 @@ class CudaCosineHungarian(BaseSimilarity):
         verbose=False,
     ):
         """
-        Initialize CudaCosineGreedy with specified parameters.
-
-        Parameters:
-        -----------
-        tolerance : float, optional
-            Tolerance for considering peaks as matching, by default 0.1.
-        mz_power : float, optional
-            Exponent for m/z values in similarity score calculation, by default 0.0.
-        intensity_power : float, optional
-            Exponent for intensity values in similarity score calculation, by default 1.0.
-        shift : float, optional
-            Value to shift m/z values, by default 0.
-        batch_size : int, optional
-            Batch size for processing spectra, by default 2048.
-        n_max_peaks : int, optional
-            Maximum number of peaks to consider in each spectrum, by default 1024.
-        match_limit : int, optional
-            Limit on the number of matches allowed, by default 2048.
-        sparse_threshold : float, optional
-            Threshold for considering scores in sparse output, by default 0.75.
-        verbose : bool, optional
-            Verbosity flag, by default False.
         """
 
         # Warn if CUDA device is unavailable
