@@ -61,7 +61,7 @@ def augmenting_path(
 
 def compile_linear_sum_assignment_kernel(N_MEM) -> callable:
     @cuda.jit(device=True)
-    def linear_sum_assignment(nc, nr, cost, maximize, a, b):
+    def linear_sum_assignment(nc, nr, cost, a, b):
         u = cuda.local.array((N_MEM,), float32)
         v = cuda.local.array((N_MEM,), float32)
         u[:] = 0
