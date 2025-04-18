@@ -243,9 +243,60 @@ class CudaCosineGreedy(BaseSimilarity):
 
         # Initialize result variable based on array_type
         if array_type == "numpy":
-            result = torch.empty(3, R, Q, dtype=torch.float32, device=self.device)
+            result = torch.empty(3, R, Q, dtype=torch.float32, 
+                                 device=self.device, 
+                                 requires_grad=False)
         elif array_type == "sparse":
             result = []
+
+        # Initialize output tensor
+        out = torch.empty(
+            3, self.batch_size, self.batch_size,
+            dtype=torch.float32,
+            device=self.device,
+            requires_grad=False
+        )
+
+        # Tensor holding lengths and norms
+        metadata = torch.zeros(
+            4, self.batch_size, 
+            dtype=torch.float32, 
+            device=self.device,
+            requires_grad=False
+        )
+
+        rspec_h, rlen_h = self._spectra_peaks_to_tensor(references)
+        qspec_h, qlen_h = self._spectra_peaks_to_tensor(queries)
+        
+        rspec_d = torch.from_numpy(rspec_h).to(self.device, non_blocking=True)
+        rlen_d = torch.from_numpy(rlen_h).to(self.device, non_blocking=True)
+        
+        qspec_d = torch.from_numpy(qspec_h).to(self.device, non_blocking=True)
+        qlen_d = torch.from_numpy(qlen_h).to(self.device, non_blocking=True)
+
+        # Pre-calculate norms
+        rnorm = (
+            (
+                (
+                    rspec_d[0, :, :] ** self.mz_power
+                    * rspec_d[1, :, :] ** self.int_power
+                )
+                ** 2
+            )
+            .sum(-1)
+            .sqrt()
+        )  # R
+        qnorm = (
+            (
+                (
+                    qspec_d[0, :, :] ** self.mz_power
+                    * qspec_d[1, :, :] ** self.int_power
+                )
+                ** 2
+            )
+            .sum(-1)
+            .sqrt()
+        )  # Q
 
         # Iterate over batched inputs
         with torch.no_grad():
@@ -258,79 +309,65 @@ class CudaCosineGreedy(BaseSimilarity):
                     qend,
                 ) = batched_inputs[batch_i]
 
-                # Tensor holding lengths and norms
-                metadata = torch.zeros(
-                    4, self.batch_size, dtype=torch.float32, device=self.device
-                )
-
                 # Convert spectra to tensors and move to device
-                rspec = torch.from_numpy(rspec).to(self.device)  # 2, R, N
-                qspec = torch.from_numpy(qspec).to(self.device)  # 2, Q, M
+                # rspec = torch.from_numpy(rspec).to(self.device, non_blocking=True)  # 2, R, N
+                # qspec = torch.from_numpy(qspec).to(self.device, non_blocking=True)  # 2, Q, M
+                # rlen_d = torch.from_numpy(rlen).to(self.device, non_blocking=True)
+                # qlen_d = torch.from_numpy(qlen).to(self.device, non_blocking=True)
 
-                # Pre-calculate norms
-                rnorm = (
-                    (
-                        (
-                            rspec[0, :, :] ** self.mz_power
-                            * rspec[1, :, :] ** self.int_power
-                        )
-                        ** 2
-                    )
-                    .sum(-1)
-                    .sqrt()
-                )  # R
-                qnorm = (
-                    (
-                        (
-                            qspec[0, :, :] ** self.mz_power
-                            * qspec[1, :, :] ** self.int_power
-                        )
-                        ** 2
-                    )
-                    .sum(-1)
-                    .sqrt()
-                )  # Q
+                # # Pre-calculate norms
+                # rnorm = (
+                #     (
+                #         (
+                #             rspec[0, :, :] ** self.mz_power
+                #             * rspec[1, :, :] ** self.int_power
+                #         )
+                #         ** 2
+                #     )
+                #     .sum(-1)
+                #     .sqrt()
+                # )  # R
+                # qnorm = (
+                #     (
+                #         (
+                #             qspec[0, :, :] ** self.mz_power
+                #             * qspec[1, :, :] ** self.int_power
+                #         )
+                #         ** 2
+                #     )
+                #     .sum(-1)
+                #     .sqrt()
+                # )  # Q
 
                 # Create tensor for lengths, and norms
-                metadata[0, : len(rlen)] = torch.from_numpy(rlen).to(self.device)
-                metadata[1, : len(qlen)] = torch.from_numpy(qlen).to(self.device)
-                metadata[2, : len(rnorm)] = rnorm
-                metadata[3, : len(qnorm)] = qnorm
-
-                # Initialize output tensor
-                out = torch.empty(
-                    3,
-                    self.batch_size,
-                    self.batch_size,
-                    dtype=torch.float32,
-                    device=self.device,
-                )
+                metadata[0, :len(rlen)] = rlen_d[rstart:rend]
+                metadata[1, :len(qlen)] = qlen_d[qstart:qend]
+                metadata[2, :len(rlen)] = rnorm[rstart:rend]
+                metadata[3, :len(qlen)] = qnorm[qstart:qend]
 
                 # Convert tensors to CUDA arrays
-                rspec = cuda.as_cuda_array(rspec)
-                qspec = cuda.as_cuda_array(qspec)
-                metadata = cuda.as_cuda_array(metadata)
-                out = cuda.as_cuda_array(out)
+                rspec_ = cuda.as_cuda_array(rspec_d, sync=False)
+                qspec_ = cuda.as_cuda_array(qspec_d, sync=False)
+                metadata_ = cuda.as_cuda_array(metadata, sync=False)
+                out_ = cuda.as_cuda_array(out, sync=True)
 
                 # Run GPU kernel
-                self.kernel(rspec, qspec, metadata, out)
+                self.kernel(rspec_[:, rstart:rend], qspec_[:, qstart:qend], metadata_, out_)
 
-                # Convert output to tensor
-                out = torch.as_tensor(out)
-
-                out = out[:, : len(rlen), : len(qlen)]
+                # # Convert output to tensor
+                out_active = out[:, :len(rlen), :len(qlen)]
 
                 # Populate result based on array_type
                 if array_type == "numpy":
-                    result[:, rstart:rend, qstart:qend] = out
+                    result[:, rstart:rend, qstart:qend] = out_active
 
                 elif array_type == "sparse":
-                    mask = out[0] >= self.sparse_threshold
+                    mask = out_active[0] >= self.sparse_threshold
                     if mask.any():
                         row, col = torch.nonzero(mask, as_tuple=True)
                         rabs = (rstart + row).cpu()
                         qabs = (qstart + col).cpu()
-                        score, matches, overflow = out[:, mask].cpu()
+                        score, matches, overflow = out_active[:, mask].cpu()
                         result.append(
                             dict(
                                 rabs=rabs.int().cpu().numpy(),
