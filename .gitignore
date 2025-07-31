@@ -178,3 +178,4 @@ test.sh
 *.jpeg
 assets/perf.svg
 assets/gpu_visuals.kra
+program.prof

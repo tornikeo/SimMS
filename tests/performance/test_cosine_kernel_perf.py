@@ -22,8 +22,9 @@ def my_spectra(gnps):
     return spectra
 
 def test_cosine_kernel_perf(my_spectra: list):
-  my_spectra = my_spectra[:len(my_spectra)//2]
+  my_spectra = my_spectra[:len(my_spectra)//4]
   cosine_greedy = CudaCosineGreedy(batch_size=2048, verbose=True)
+  cosine_greedy.matrix(my_spectra[:64], my_spectra[:64])
   start_time = time.time()
   cosine_greedy.matrix(my_spectra, my_spectra)
   end_time = time.time()

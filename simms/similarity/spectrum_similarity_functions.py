@@ -166,8 +166,9 @@ def cosine_kernel(
             int32[::1],
             float32[::1],
         ),
+        lineinfo=True,
         device=True,
-        inline=True,
+        inline=False,
     )
     def collect_peak_pairs(
         # Inputs
@@ -410,7 +411,8 @@ def cosine_kernel(
         blocks_per_grid=BLOCKS_PER_GRID, threads_per_block=THREADS_PER_BLOCK
     )
     @cuda.jit(
-        void(FLOAT[:, :, ::1], FLOAT[:, :, ::1], FLOAT[:, ::1], float32[:, :, ::1])
+        void(FLOAT[:, :, ::1], FLOAT[:, :, ::1], FLOAT[:, ::1], float32[:, :, ::1]),
+        debug=True, lineinfo=True
     )
     def _kernel(
         rspec,
@@ -478,7 +480,7 @@ def cosine_kernel(
             num_match = collect_peak_pairs(
                 i, j, rspec, qspec, metadata, matches, values
             )
-
+      
         # In case we didn't get any matches, we return. We already have set 0 as the default output above.
         if num_match == 0:
             return
@@ -493,11 +495,15 @@ def cosine_kernel(
         # PART 2: Sort matched peaks based on cosine product value
         # We use a non-recursive mergesort in order to sort matches by the peak contributions (values)
         # We require a 2 additional arrays to store the sorting intermediate results.
-        sort_peaks_by_value(matches, values, num_match)
+        sort_peaks_by_value(matches, values, num_match) # Costs 13% of runtime
 
+        # Anything below this costs <1%
         # PART 3: Accumulate unnormalized cosine score and de-duplicate
         # Having peak matches sorted we can start summing all peak contributions to the unnormalized score, from the largest to the smallest.
         # To avoid duplicates, we create two boolean arrays that keep track of used matches.
+        # FIXME: It should be possible to encode booleans as bits.
+        # each boolean is (likely) using 8 bits. But we could instead use 1 bit per boolean, by
+        # packing consecutive 8 into one byte.
         used_r = cuda.local.array(N_MAX_PEAKS, types.boolean)
         used_q = cuda.local.array(N_MAX_PEAKS, types.boolean)
         for m in range(N_MAX_PEAKS):
